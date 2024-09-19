@@ -1,0 +1,116 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SAM
+
+Parameters:
+  DeploymentVersion:
+    Type: String
+    Default: "v1"
+    Description: "Version of the deployment, change this to force a new deployment"
+
+Resources:
+
+  MyApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: API with lambda non proxy
+      Name: apilambdanonproxy
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  MyResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt MyApi.RootResourceId
+      PathPart: 'pets'
+      RestApiId: !Ref MyApi
+
+  MyMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      Integration:
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        IntegrationHttpMethod: POST
+        RequestTemplates:
+          "application/json": "
+            #set($inputRoot = $input.path('$'))
+            {
+              \"name\": \"$inputRoot.name\",
+              \"throwError\":\"$input.params('throwerror')\"
+            }"
+        IntegrationResponses:
+        - StatusCode: '200'
+          ResponseTemplates:
+            "application/json": "
+              #set($inputRoot = $input.path('$'))
+              {
+                \"petId\": \"$inputRoot.PetId\"
+              }"
+          ResponseParameters:
+            method.response.header.version: "'v1'"
+            method.response.header.id: integration.response.body.PetId
+        - StatusCode: '500'
+          SelectionPattern: ".*An error was thrown.*"
+          ResponseTemplates:
+            "application/json": "
+              #set($inputRoot = $input.path('$'))
+              {
+                \"error\": \"$inputRoot.errorType\"
+              }"
+          ResponseParameters:
+            method.response.header.version: "'v1'"
+        Type: AWS
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MyApiFunction.Arn}/invocations"
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.version: true
+            method.response.header.id: true
+        - StatusCode: '500'
+          ResponseParameters:
+            method.response.header.version: true
+      OperationName: 'pets registration'
+      ResourceId: !Ref MyResource
+      RestApiId: !Ref MyApi
+
+
+  MyPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+    - MyApi
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref MyApiFunction
+      Principal: apigateway.amazonaws.com
+
+  MyDeployment:
+    DependsOn: 
+    - MyMethod
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref MyApi
+      Description: !Sub "Deployment version ${DeploymentVersion}"
+      StageDescription: 
+        Description: !Sub "Deployment version ${DeploymentVersion}"
+      StageName: prod
+
+  MyApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 60
+      MemorySize: 512
+      Tracing: Active
+      Runtime: dotnet8
+      Architectures:
+        - x86_64    
+      Handler: MyLambda::MyLambda.Function::FunctionHandler
+      CodeUri: ./src/MyLambda/
+
+Outputs:
+  MyApiEndpoint:
+    Description: "API endpoint"
+    Value: !Sub "https://${MyApi}.execute-api.${AWS::Region}.amazonaws.com/prod/pets"

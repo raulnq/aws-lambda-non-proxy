@@ -18,6 +18,7 @@ public class Function
             throw new ApplicationException("An error was thrown");
         }
 
+
         return new RegisterPetResponse(Guid.NewGuid(), input.Name);
     }
 }

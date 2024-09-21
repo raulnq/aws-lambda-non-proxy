@@ -3,18 +3,11 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   SAM
 
-Parameters:
-  DeploymentVersion:
-    Type: String
-    Default: "v1"
-    Description: "Version of the deployment, change this to force a new deployment"
-
 Resources:
-
   MyApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
-      Description: API with lambda non proxy
+      Description: API with lambda non proxy integration
       Name: apilambdanonproxy
       EndpointConfiguration:
         Types:
@@ -27,14 +20,49 @@ Resources:
       PathPart: 'pets'
       RestApiId: !Ref MyApi
 
+  MyApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 60
+      MemorySize: 512
+      Tracing: Active
+      Runtime: dotnet8
+      Architectures:
+        - x86_64    
+      Handler: MyLambda::MyLambda.Function::FunctionHandler
+      CodeUri: ./src/MyLambda/
+
+  MyPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+    - MyApi
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref MyApiFunction
+      Principal: apigateway.amazonaws.com
+
   MyMethod:
     Type: AWS::ApiGateway::Method
     Properties:
+      ResourceId: !Ref MyResource
+      RestApiId: !Ref MyApi
       AuthorizationType: NONE
       HttpMethod: POST
+      RequestParameters:
+        method.request.header.version: true
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.version: true
+            method.response.header.id: true
+        - StatusCode : '500'
+          ResponseParameters:
+            method.response.header.version: true
       Integration:
         PassthroughBehavior: WHEN_NO_TEMPLATES
         IntegrationHttpMethod: POST
+        Type: AWS
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MyApiFunction.Arn}/invocations"
         RequestTemplates:
           "application/json": "
             #set($inputRoot = $input.path('$'))
@@ -42,6 +70,8 @@ Resources:
               \"name\": \"$inputRoot.name\",
               \"throwError\":\"$input.params('throwerror')\"
             }"
+        RequestParameters:
+          integration.request.header.version: method.request.header.version
         IntegrationResponses:
         - StatusCode: '200'
           ResponseTemplates:
@@ -63,54 +93,11 @@ Resources:
               }"
           ResponseParameters:
             method.response.header.version: "'v1'"
-        Type: AWS
-        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MyApiFunction.Arn}/invocations"
-      MethodResponses:
-        - StatusCode: '200'
-          ResponseParameters:
-            method.response.header.version: true
-            method.response.header.id: true
-        - StatusCode: '500'
-          ResponseParameters:
-            method.response.header.version: true
-      OperationName: 'pets registration'
-      ResourceId: !Ref MyResource
-      RestApiId: !Ref MyApi
-
-
-  MyPermission:
-    Type: AWS::Lambda::Permission
-    DependsOn:
-    - MyApi
-    Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !Ref MyApiFunction
-      Principal: apigateway.amazonaws.com
-
-  MyDeployment:
-    DependsOn: 
-    - MyMethod
-    Type: AWS::ApiGateway::Deployment
-    Properties:
-      RestApiId: !Ref MyApi
-      Description: !Sub "Deployment version ${DeploymentVersion}"
-      StageDescription: 
-        Description: !Sub "Deployment version ${DeploymentVersion}"
-      StageName: prod
-
-  MyApiFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Timeout: 60
-      MemorySize: 512
-      Tracing: Active
-      Runtime: dotnet8
-      Architectures:
-        - x86_64    
-      Handler: MyLambda::MyLambda.Function::FunctionHandler
-      CodeUri: ./src/MyLambda/
 
 Outputs:
   MyApiEndpoint:
     Description: "API endpoint"
     Value: !Sub "https://${MyApi}.execute-api.${AWS::Region}.amazonaws.com/prod/pets"
+  RestApiId:
+    Description: "REST API id"
+    Value: !Ref MyApi

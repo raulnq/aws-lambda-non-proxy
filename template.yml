@@ -5,20 +5,15 @@ Description: >
 
 Resources:
   MyApi:
-    Type: AWS::ApiGateway::RestApi
+    Type: AWS::Serverless::Api
     Properties:
-      Description: API with lambda non proxy integration
-      Name: apilambdanonproxy
-      EndpointConfiguration:
-        Types:
-          - REGIONAL
-
-  MyResource:
-    Type: AWS::ApiGateway::Resource
-    Properties:
-      ParentId: !GetAtt MyApi.RootResourceId
-      PathPart: 'pets'
-      RestApiId: !Ref MyApi
+     OpenApiVersion: '3.0.1'
+     DefinitionBody:
+       'Fn::Transform':
+         Name: 'AWS::Include'
+         Parameters:
+           Location: openapi.yaml
+     StageName: prod
 
   MyApiFunction:
     Type: AWS::Serverless::Function
@@ -31,68 +26,13 @@ Resources:
         - x86_64    
       Handler: MyLambda::MyLambda.Function::FunctionHandler
       CodeUri: ./src/MyLambda/
-
-  MyPermission:
-    Type: AWS::Lambda::Permission
-    DependsOn:
-    - MyApi
-    Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !Ref MyApiFunction
-      Principal: apigateway.amazonaws.com
-
-  MyMethod:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      ResourceId: !Ref MyResource
-      RestApiId: !Ref MyApi
-      AuthorizationType: NONE
-      HttpMethod: POST
-      RequestParameters:
-        method.request.header.version: true
-      MethodResponses:
-        - StatusCode: '200'
-          ResponseParameters:
-            method.response.header.version: true
-            method.response.header.id: true
-        - StatusCode : '500'
-          ResponseParameters:
-            method.response.header.version: true
-      Integration:
-        PassthroughBehavior: WHEN_NO_TEMPLATES
-        IntegrationHttpMethod: POST
-        Type: AWS
-        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MyApiFunction.Arn}/invocations"
-        RequestTemplates:
-          "application/json": "
-            #set($inputRoot = $input.path('$'))
-            {
-              \"name\": \"$inputRoot.name\",
-              \"throwError\":\"$input.params('throwerror')\"
-            }"
-        RequestParameters:
-          integration.request.header.version: method.request.header.version
-        IntegrationResponses:
-        - StatusCode: '200'
-          ResponseTemplates:
-            "application/json": "
-              #set($inputRoot = $input.path('$'))
-              {
-                \"petId\": \"$inputRoot.PetId\"
-              }"
-          ResponseParameters:
-            method.response.header.version: "'v1'"
-            method.response.header.id: integration.response.body.PetId
-        - StatusCode: '500'
-          SelectionPattern: ".*An error was thrown.*"
-          ResponseTemplates:
-            "application/json": "
-              #set($inputRoot = $input.path('$'))
-              {
-                \"error\": \"$inputRoot.errorType\"
-              }"
-          ResponseParameters:
-            method.response.header.version: "'v1'"
+      Events:
+        Post:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /pets
+            Method: post
 
 Outputs:
   MyApiEndpoint:
